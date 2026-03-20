@@ -163,6 +163,7 @@ class Task:
     priority: str                   # 'low' | 'medium' | 'high'
     category: str = "general"
     preferred_time: str = ""
+    completed: bool = False
 
     def __post_init__(self) -> None:
         # Normalise to lowercase and reject unknown values immediately so
@@ -178,6 +179,10 @@ class Task:
     # ------------------------------------------------------------------
     # Methods
     # ------------------------------------------------------------------
+
+    def mark_complete(self) -> None:
+        """Mark this task as completed."""
+        self.completed = True
 
     def is_high_priority(self) -> bool:
         """Return True if this task's priority is 'high'."""
