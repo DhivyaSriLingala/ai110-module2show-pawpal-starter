@@ -238,7 +238,7 @@ class ScheduledTask:
                 Reason: Scheduled first — highest priority task of the day.
         """
         line = (
-            f"{self.start_time}–{self.end_time}  "
+            f"{self.start_time}-{self.end_time}  "
             f"{self.task.title}  ({self.task.priority} priority)"
         )
         if self.reason:
@@ -372,7 +372,7 @@ class Scheduler:
                 parts.append(f"preferred time: {task.preferred_time}")
 
             if is_senior_pet and task.category == "exercise":
-                parts.append(f"kept in plan — {self.pet.name} needs gentle activity even as a senior")
+                parts.append(f"kept in plan - {self.pet.name} needs gentle activity even as a senior")
 
             reason = "; ".join(parts).capitalize() + "."
 
