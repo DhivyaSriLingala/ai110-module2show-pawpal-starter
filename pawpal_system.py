@@ -16,6 +16,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+# Valid priority levels — used by Task validation and Scheduler sorting
+VALID_PRIORITIES: tuple[str, ...] = ("low", "medium", "high")
+
 
 # ---------------------------------------------------------------------------
 # Owner
@@ -40,6 +43,9 @@ class Owner:
         self.name = name
         self.available_minutes = available_minutes
         self.preferences: list[str] = preferences if preferences is not None else []
+        # AI review fix: UML shows Owner "1" --> "1..*" Pet but the original
+        # skeleton had no pets attribute on Owner at all.
+        self.pets: list[Pet] = []
 
     # ------------------------------------------------------------------
     # Methods
@@ -51,6 +57,10 @@ class Owner:
 
     def add_preference(self, preference: str) -> None:
         """Append a new preference string to the preferences list."""
+        pass  # TODO: implement
+
+    def add_pet(self, pet: Pet) -> None:
+        """Register a pet as belonging to this owner."""
         pass  # TODO: implement
 
 
@@ -123,6 +133,17 @@ class Task:
     priority: str                   # 'low' | 'medium' | 'high'
     category: str = "general"
     preferred_time: str = ""
+
+    def __post_init__(self) -> None:
+        # AI review fix: priority is a plain str with no guard, so passing
+        # "urgent" or "HIGH" would silently break prioritize_tasks().
+        # Normalise to lowercase and reject unknown values immediately.
+        self.priority = self.priority.lower()
+        if self.priority not in VALID_PRIORITIES:
+            raise ValueError(
+                f"Invalid priority '{self.priority}'. "
+                f"Must be one of: {VALID_PRIORITIES}"
+            )
 
     # ------------------------------------------------------------------
     # Methods
@@ -203,6 +224,11 @@ class Scheduler:
         self.pet = pet
         self.tasks: list[Task] = []
         self.schedule: list[ScheduledTask] = []
+        # AI review fix: fits_in_time() had no way to know how many minutes
+        # had already been consumed by previously scheduled tasks.
+        # remaining_minutes starts at the owner's full budget and is
+        # decremented inside generate_schedule() as tasks are added.
+        self.remaining_minutes: int = owner.available_minutes
 
     # ------------------------------------------------------------------
     # Task management

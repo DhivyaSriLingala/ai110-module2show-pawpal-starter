@@ -106,6 +106,25 @@ The core engine that takes all inputs and produces an ordered daily plan.
 
 ---
 
+**c. Initial design — Class descriptions and responsibilities**
+
+The system is built around five classes. Each one has a single, clear responsibility so that they stay easy to test and modify independently.
+
+| Class | Responsibility |
+|---|---|
+| `Owner` | Holds the human side of the relationship — who the user is, how much time they have today, and any scheduling preferences (e.g. "prefer morning walks"). It is the source of the **time budget** the scheduler must respect. |
+| `Pet` | Holds the animal's profile — name, species, age, and any special needs. Its `is_senior()` method lets the scheduler make gentler choices (shorter durations, lower-intensity tasks) for older animals without hardcoding that logic elsewhere. |
+| `Task` | Represents one care activity. It is a pure **data object** (implemented as a Python dataclass) that carries everything the scheduler needs to decide whether and when to include the task: title, duration, priority, category, and an optional preferred time-of-day hint. |
+| `ScheduledTask` | A **wrapper** that pairs a `Task` with a concrete time slot (`start_time`, `end_time`) and a plain-English `reason`. It is the output unit — one `ScheduledTask` = one line in the displayed plan. |
+| `Scheduler` | The **engine**. It accepts an `Owner` and a `Pet`, manages the task pool, and runs the scheduling algorithm (`generate_schedule`). It is the only class that needs to know about all the others, keeping coupling to a single place. |
+
+**Relationships between classes:**
+- `Owner` owns one or more `Pet` objects (real-world belonging).
+- `Scheduler` reads from `Owner` (time budget) and `Pet` (context) but does not own them — they are passed in from outside.
+- `Scheduler` aggregates `Task` objects (tasks exist independently and can be reused or edited before scheduling).
+- `Scheduler` composes `ScheduledTask` objects (they are created by and belong entirely to the scheduler's output; they have no life outside a generated plan).
+- Each `ScheduledTask` wraps exactly one `Task`.
+
 **c. Initial design — Mermaid.js Class Diagram**
 
 The diagram below shows all five classes, their attributes and methods, and how they relate to each other.
@@ -175,8 +194,35 @@ classDiagram
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+After generating the class skeleton, the skeleton was reviewed using the following prompt against `pawpal_system.py`:
+
+> *"Review this skeleton. Does it match the UML diagram? Are there any missing relationships or potential logic bottlenecks?"*
+
+Three issues were identified and acted on:
+
+---
+
+**Change 1 — Added `pets` list and `add_pet()` to `Owner`**
+
+- **What the AI noticed:** The UML diagram explicitly shows `Owner "1" --> "1..*" Pet : owns`, but the original skeleton had no `pets` attribute on `Owner` at all. The relationship existed in the diagram but was silently dropped when translating to code.
+- **What changed:** Added `self.pets: list[Pet] = []` to `Owner.__init__` and a new `add_pet(pet)` method stub.
+- **Why accepted:** The UML diagram was deliberately designed to include this relationship for a reason — an owner can have more than one pet, and future features (multi-pet scheduling) depend on it being there. Leaving it out would have required a breaking change later.
+
+---
+
+**Change 2 — Added `__post_init__` validation to `Task`**
+
+- **What the AI noticed:** `Task.priority` is declared as a plain `str` with a comment saying it should be `'low' | 'medium' | 'high'`, but nothing enforces that. Passing `"urgent"` or `"High"` would be silently accepted and would break `prioritize_tasks()` at runtime with no helpful error message.
+- **What changed:** Added a `__post_init__` method to the `Task` dataclass that normalises priority to lowercase and raises a clear `ValueError` for unrecognised values. Added a module-level `VALID_PRIORITIES` constant so the valid options are defined in one place.
+- **Why accepted:** Silent data bugs are harder to trace than loud ones. Failing fast with a readable error message at the point of bad input is better than a confusing crash deep inside the scheduler.
+
+---
+
+**Change 3 — Added `remaining_minutes` attribute to `Scheduler`**
+
+- **What the AI noticed:** `fits_in_time(task)` was supposed to check whether a task fits in the available time, but `Scheduler` only stored `owner.available_minutes` (the full day budget). There was no field tracking how many minutes had already been consumed by previously scheduled tasks. Without it, `fits_in_time()` would have no correct value to compare against after the first task was added.
+- **What changed:** Added `self.remaining_minutes: int = owner.available_minutes` to `Scheduler.__init__`. This value will be decremented inside `generate_schedule()` as each task is added to the plan.
+- **Why accepted:** This is a genuine logic bottleneck — the scheduling loop cannot work correctly without a live count of remaining time. It was a missing piece, not a style preference.
 
 ---
 
