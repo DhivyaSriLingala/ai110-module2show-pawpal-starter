@@ -47,6 +47,7 @@ class Owner:
 
     def __init__(self, name: str, available_minutes: int,
                  preferences: Optional[list[str]] = None) -> None:
+        """Initialise the owner with a name, daily time budget, and optional preferences."""
         self.name = name
         self.available_minutes = available_minutes
         self.preferences: list[str] = preferences if preferences is not None else []
@@ -166,6 +167,7 @@ class Task:
     completed: bool = False
 
     def __post_init__(self) -> None:
+        """Validate and normalise the priority field immediately after construction."""
         # Normalise to lowercase and reject unknown values immediately so
         # invalid priorities cause a clear error at construction time rather
         # than a silent bug inside the scheduler.
@@ -196,6 +198,7 @@ class Task:
             "priority": self.priority,
             "category": self.category,
             "preferred_time": self.preferred_time,
+            "completed": self.completed,
         }
 
 
@@ -219,6 +222,7 @@ class ScheduledTask:
     """
 
     def __init__(self, task: Task, start_time: str, reason: str = "") -> None:
+        """Wrap a Task with a concrete start_time and scheduling reason; end_time is computed automatically."""
         self.task = task
         self.start_time = start_time
         self.end_time = ""
@@ -277,6 +281,7 @@ class Scheduler:
     """
 
     def __init__(self, owner: Owner, pet: Pet) -> None:
+        """Set up the scheduler with an owner (time budget) and primary pet (context)."""
         self.owner = owner
         self.pet = pet
         # Pull tasks from all of the owner's pets at construction time.
