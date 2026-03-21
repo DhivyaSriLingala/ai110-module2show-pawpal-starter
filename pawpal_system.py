@@ -18,6 +18,7 @@ Data-flow design:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import Optional
 
 # Valid priority levels — used by Task validation and Scheduler sorting.
@@ -129,7 +130,8 @@ class Pet:
         return self.age >= threshold
 
     def add_task(self, task: Task) -> None:
-        """Add a care task to this pet's task list."""
+        """Add a care task to this pet's task list and tag it with the pet's name."""
+        task.pet_name = self.name
         self.tasks.append(task)
 
     def remove_task(self, title: str) -> None:
@@ -165,6 +167,9 @@ class Task:
     category: str = "general"
     preferred_time: str = ""
     completed: bool = False
+    frequency: str = "once"         # 'once', 'daily', or 'weekly'
+    due_date: Optional[date] = None # date this task is due; used by recurring logic
+    pet_name: str = ""              # set automatically by Pet.add_task()
 
     def __post_init__(self) -> None:
         """Validate and normalise the priority field immediately after construction."""
@@ -182,9 +187,31 @@ class Task:
     # Methods
     # ------------------------------------------------------------------
 
-    def mark_complete(self) -> None:
-        """Mark this task as completed."""
+    def mark_complete(self) -> Optional["Task"]:
+        """Mark this task as completed and return the next occurrence if recurring.
+
+        Returns
+        -------
+        Task | None
+            A new Task for the next due date if frequency is 'daily' or 'weekly';
+            None if the task is a one-off ('once').
+        """
         self.completed = True
+        if self.frequency not in ("daily", "weekly"):
+            return None
+        base = self.due_date if self.due_date else date.today()
+        delta = timedelta(days=1 if self.frequency == "daily" else 7)
+        return Task(
+            title=self.title,
+            duration_minutes=self.duration_minutes,
+            priority=self.priority,
+            category=self.category,
+            preferred_time=self.preferred_time,
+            completed=False,
+            frequency=self.frequency,
+            due_date=base + delta,
+            pet_name=self.pet_name,
+        )
 
     def is_high_priority(self) -> bool:
         """Return True if this task's priority is 'high'."""
@@ -199,6 +226,9 @@ class Task:
             "category": self.category,
             "preferred_time": self.preferred_time,
             "completed": self.completed,
+            "frequency": self.frequency,
+            "due_date": str(self.due_date) if self.due_date else "",
+            "pet_name": self.pet_name,
         }
 
 
@@ -393,6 +423,112 @@ class Scheduler:
             self.remaining_minutes -= task.duration_minutes
 
         return self.schedule
+
+    # ------------------------------------------------------------------
+    # Sorting
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def sort_by_time(scheduled_tasks: list[ScheduledTask]) -> list[ScheduledTask]:
+        """Return a copy of scheduled_tasks sorted by start_time (earliest first).
+
+        Uses a lambda with a tuple key so '09:05' sorts correctly relative to
+        '09:30' — plain string sort would also work for HH:MM, but the integer
+        tuple is explicit and safe against zero-padding inconsistencies.
+
+        Parameters
+        ----------
+        scheduled_tasks : list[ScheduledTask]
+            Any list of ScheduledTask objects (need not come from this scheduler).
+
+        Returns
+        -------
+        list[ScheduledTask]
+            New sorted list; the original is not mutated.
+        """
+        return sorted(
+            scheduled_tasks,
+            key=lambda st: tuple(map(int, st.start_time.split(":"))),
+        )
+
+    # ------------------------------------------------------------------
+    # Filtering
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def filter_tasks(
+        tasks: list[Task],
+        *,
+        pet_name: Optional[str] = None,
+        completed: Optional[bool] = None,
+    ) -> list[Task]:
+        """Return a filtered subset of a task list.
+
+        Both filters are optional and can be combined.
+
+        Parameters
+        ----------
+        tasks : list[Task]
+            The pool to filter (e.g. owner.get_all_tasks()).
+        pet_name : str, optional
+            If provided, only return tasks whose pet_name matches (case-insensitive).
+        completed : bool, optional
+            If True, return only completed tasks.
+            If False, return only incomplete tasks.
+            If None, completion status is ignored.
+
+        Returns
+        -------
+        list[Task]
+            Filtered list; the original is not mutated.
+        """
+        result = tasks
+        if pet_name is not None:
+            result = [t for t in result if t.pet_name.lower() == pet_name.lower()]
+        if completed is not None:
+            result = [t for t in result if t.completed == completed]
+        return result
+
+    # ------------------------------------------------------------------
+    # Conflict detection
+    # ------------------------------------------------------------------
+
+    def detect_conflicts(self) -> list[str]:
+        """Check the current schedule for overlapping time slots.
+
+        Two ScheduledTask entries conflict when their time windows overlap —
+        i.e. one starts before the other ends.  Uses a lightweight O(n^2)
+        pairwise comparison which is fast enough for a typical daily schedule
+        of fewer than ~50 tasks.
+
+        Tradeoff: this checks *exact* minute-level overlap. Two tasks that
+        start and end at exactly the same boundary minute (e.g. 08:30-08:30)
+        are NOT flagged — that edge case is considered acceptable because
+        zero-duration tasks are not meaningful in this domain.
+
+        Returns
+        -------
+        list[str]
+            Warning strings for every conflicting pair.
+            Empty list means the schedule is conflict-free.
+        """
+        def to_mins(t: str) -> int:
+            h, m = map(int, t.split(":"))
+            return h * 60 + m
+
+        warnings = []
+        for i, a in enumerate(self.schedule):
+            for b in self.schedule[i + 1:]:
+                a_start = to_mins(a.start_time)
+                a_end   = to_mins(a.end_time)
+                b_start = to_mins(b.start_time)
+                b_end   = to_mins(b.end_time)
+                if a_start < b_end and a_end > b_start:
+                    warnings.append(
+                        f"CONFLICT: '{a.task.title}' ({a.start_time}-{a.end_time})"
+                        f" overlaps '{b.task.title}' ({b.start_time}-{b.end_time})"
+                    )
+        return warnings
 
     def explain_plan(self) -> str:
         """Return a human-readable summary of the full day's plan."""

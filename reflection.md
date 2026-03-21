@@ -230,13 +230,30 @@ Three issues were identified and acted on:
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler considers three constraints, in this order of importance:
+
+1. **Time budget** — `owner.available_minutes` is the hard outer limit. A task that would push the total over budget is skipped entirely, not truncated. This is the highest-priority constraint because the owner cannot create more time in the day.
+
+2. **Task priority** — Within the time budget, tasks are sorted high → medium → low before placement. High-priority tasks (medication, feeding) are always placed before lower-priority ones like grooming or enrichment play, regardless of their preferred time hint.
+
+3. **Preferred time** — `preferred_time` is a soft hint ("morning", "evening") that is embedded in the reason string but does not change task order. It was ranked lowest because enforcing it strictly would require time-window logic that significantly complicates the scheduler for limited real-world gain — most pet care tasks have some flexibility.
+
+**Why this ordering:** Medication and feeding cannot be skipped; grooming can. Time is finite and non-negotiable. Preferred time is a preference, not a requirement.
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+**Tradeoff: lightweight conflict detection checks exact minute-level overlap, not intent.**
+
+The `detect_conflicts()` method uses a pairwise comparison to find any two scheduled tasks whose time windows overlap (i.e. one starts before the other ends). This means it catches real overlaps like:
+
+```
+09:00-09:30  Walk in park
+09:15-09:35  Vet appointment  ← flagged: starts before Walk ends
+```
+
+But it does **not** attempt to resolve the conflict — it returns a warning string and leaves the schedule unchanged. It also does not detect "soft" conflicts, such as two tasks that are individually fine but leave no gap for travel time between them.
+
+**Why this tradeoff is reasonable:** The alternative — a full constraint-satisfaction solver — would be far more complex to implement, test, and explain to a non-technical user. For a daily pet care schedule with fewer than ~20 tasks, the pairwise O(n²) check is instantaneous and the results are easy to understand. A warning that says *"Walk in park (09:00-09:30) overlaps Vet appointment (09:15-09:35)"* gives the owner exactly the information they need to fix the problem manually. Crashing the program or silently rearranging the schedule would be worse than a transparent warning.
 
 ---
 
