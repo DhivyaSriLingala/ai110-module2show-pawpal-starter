@@ -126,6 +126,10 @@ The suite lives in `tests/test_pawpal.py` and contains **42 tests** across 6 gro
 - Calling `generate_schedule()` **twice** does not duplicate tasks in the output
 - A recurring task with **no `due_date` set** falls back to `date.today()` as the base
 
+### Test results
+
+![pytest — 42 passed](Pytest.png)
+
 ### Confidence level
 
 **★★★★☆ (4 / 5)**
