@@ -352,15 +352,44 @@ But it does **not** attempt to resolve the conflict — it returns a warning str
 
 ## 3. AI Collaboration
 
-**a. How you used AI**
+**a. How you used AI — Copilot feature breakdown**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+AI was used across every phase of the project, but the role it played shifted depending on the phase:
 
-**b. Judgment and verification**
+| Phase | How AI was used |
+|---|---|
+| **Design (Phase 1)** | Brainstorming class responsibilities; reviewing the Mermaid UML diagram for missing relationships and redundant arrows |
+| **Implementation (Phase 2)** | Generating class skeletons from UML; writing method bodies for standard patterns (`sort`, `filter`, `timedelta`); catching the `remaining_minutes` logic bottleneck |
+| **Algorithms (Phase 3)** | Drafting the conflict-detection pairwise loop; suggesting the integer-tuple lambda key for `sort_by_time()`; brainstorming edge cases for recurring tasks |
+| **Testing (Phase 4)** | Drafting the initial test plan ("what are the most important edge cases for a scheduler with sorting and recurring tasks?"); generating fixture patterns; explaining why a back-to-back boundary test matters |
+| **UI wiring (Phase 5)** | Suggesting `st.session_state` patterns; helping structure the Streamlit form→method flow |
+| **Documentation** | Drafting the README Features table; suggesting the "Smarter Scheduling" section structure |
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+**Most effective Copilot features:**
+
+1. **Inline Chat on a specific method stub** — pointing Copilot at a single `pass` and asking "implement this" with the surrounding context visible produced accurate, focused code far more reliably than asking in a general chat window. For example: asking it to implement `_calculate_end_time()` with the `start_time: str` type hint visible gave a correct `HH:MM` arithmetic solution on the first try.
+
+2. **`#file:` references in Chat** — using `#file:pawpal_system.py` as context grounded Copilot's answers in the actual code rather than generic Python patterns. When asked "based on my skeleton, how should Scheduler retrieve tasks from Owner's pets?", the answer was specific to the existing class structure, not a textbook answer.
+
+3. **"Review this for missing relationships or bottlenecks"** — asking for a review prompt (rather than "write code") surfaced real issues: the missing `Owner.pets` attribute and the absent `remaining_minutes` counter were both caught this way. Review prompts consistently produced more useful output than generation prompts for design work.
+
+4. **Separate chat sessions per phase** — keeping design, implementation, testing, and documentation in different sessions prevented earlier context from polluting later discussions. The testing session in particular benefited from starting fresh — it stayed focused entirely on edge cases rather than drifting into re-explaining the implementation.
+
+**Which prompt types were most helpful:**
+
+- *"Based on #file:X, what are the most important edge cases to test for Y?"* — produced concrete, relevant test scenarios, not generic suggestions.
+- *"Review this method. Is the algorithm correct, and is there a simpler way to express it?"* — consistently identified both correctness issues and over-engineering.
+- *"Explain this test to me before I accept it"* — forced Copilot to make its reasoning explicit, which made it easier to spot when a test was testing the wrong thing.
+
+---
+
+**b. Judgment and verification — one rejected suggestion**
+
+**The suggestion:** When asked to implement `generate_schedule()`, Copilot's first draft included logic that sorted tasks in-place using `self.tasks.sort(...)`, which mutated the scheduler's internal task pool permanently. This meant that after calling `generate_schedule()` once, the task pool was no longer in insertion order — repeated calls would produce different results, and `add_task()` after the first generation would add new tasks to an already-sorted list with no predictable position.
+
+**Why it was rejected:** The mutation broke the contract that `generate_schedule()` is a read-from-the-pool, write-to-the-schedule operation. It should be callable multiple times with consistent results. The correct approach was to use `sorted(...)` which returns a new list without touching `self.tasks`, and to temporarily swap `self.tasks` only within the scope of the generation loop before restoring it.
+
+**How it was verified:** The test `test_schedule_resets_on_repeated_call` was written specifically to catch this: calling `generate_schedule()` twice must produce the same count of scheduled tasks. It would have failed on the in-place sort version because the second call would have sorted an already-sorted list of a different composition. Running the test suite after switching to `sorted(...)` confirmed the fix without regression.
 
 ---
 
@@ -368,13 +397,48 @@ But it does **not** attempt to resolve the conflict — it returns a warning str
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+The 42 tests in `tests/test_pawpal.py` cover six groups of behaviour:
+
+1. **Task basics** — The most fundamental guarantees: `completed` starts `False`, flips to `True` after `mark_complete()`, and stays `True` if called again. `add_task()` increases the pet's task count by exactly one. Priority strings are validated at construction time so invalid values fail loudly, not silently.
+
+2. **Sorting** — `sort_by_time()` must return slots in chronological order regardless of input order, must not mutate the original list, and must handle empty and single-item inputs without crashing.
+
+3. **Recurrence** — `mark_complete()` on a daily task must return a new `Task` with `due_date = original + 1 day`; weekly must add 7 days. The next occurrence must inherit all fields and start `completed=False`. One-off tasks must return `None`.
+
+4. **Conflict detection** — Two overlapping time windows must be flagged; back-to-back tasks (end == next start) must **not** be flagged (the boundary is important — it would be a false positive). Three mutually-overlapping tasks must produce all three pairwise warnings. Empty and single-task schedules must return zero conflicts.
+
+5. **Filtering** — `filter_tasks()` by `pet_name` must be case-insensitive. By `completed=True/False` must include/exclude the right tasks. Combined filters must apply both constraints. An empty input list must return an empty list.
+
+6. **Scheduler** — High-priority tasks must appear before low-priority ones in the output. A task longer than the available budget must not appear in the schedule. Calling `generate_schedule()` twice must not duplicate tasks. `remaining_minutes` must decrease by exactly the sum of scheduled durations.
+
+**Why these tests were important:**
+
+The scheduler interacts with every other class — a bug in `prioritize_tasks()` would corrupt the schedule silently, a bug in `fits_in_time()` could either over-commit or under-use the time budget, and a wrong `_calculate_end_time()` would propagate bad data to the conflict detector. Testing each behaviour in isolation made it possible to locate failures precisely rather than debugging the whole system at once.
+
+The back-to-back boundary test for conflict detection was especially important because it guards against a false-positive bug: an off-by-one error in the overlap condition (`<` vs `<=`) would incorrectly flag legitimate consecutive tasks as conflicts and make the UI show warnings on every valid plan.
+
+---
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+**★★★★☆ (4 / 5)**
+
+All 42 tests pass and cover the full backend logic layer. Confidence is high for:
+- Priority ordering under all combinations of task pools
+- Time-budget enforcement including edge cases (zero tasks, task exactly equal to budget, task one minute over budget)
+- Recurring task date arithmetic for both daily and weekly frequencies
+- Conflict detection including the back-to-back boundary
+- Filter accuracy for all four combinations of pet/status filters
+
+The remaining gap (the missing star) is the Streamlit UI layer. `app.py` is not covered by automated tests. The following scenarios have only been manually verified:
+- The "Done" button correctly triggers `mark_complete()` and adds the next occurrence to the pet
+- The conflict warnings display in the correct UI component after schedule generation
+- The task filter table updates correctly when the dropdowns are changed
+
+If given more time, the next edge cases to test would be:
+- **Two pets with tasks of the same title** — does `filter_tasks(pet_name=...)` correctly isolate them?
+- **A schedule generated on day boundary (23:45 + 30 min task)** — `end_time` would roll to `00:15` which is technically the next day; `detect_conflicts()` would misread it as before midnight.
+- **Owner with `available_minutes = 0`** — should produce an empty schedule without an error.
 
 ---
 
@@ -382,12 +446,26 @@ But it does **not** attempt to resolve the conflict — it returns a warning str
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+The part of this project I am most satisfied with is the **data-flow architecture** — the decision to have tasks live on `Pet`, be aggregated by `Owner.get_all_tasks()`, and retrieved by `Scheduler` rather than managed directly on the scheduler. This decision emerged from the AI review phase (it was a gap between the initial UML and the skeleton) but once it was in place, every subsequent feature — filtering by pet name, scoping the scheduler to one pet at a time, adding recurring task next-occurrences back to the correct pet — became straightforward. Good data ownership makes features compose cleanly.
 
-**b. What you would improve**
+The test suite also worked out well. Writing tests for the back-to-back boundary case and the "three-way overlap" scenario forced me to think carefully about the exact semantics of `detect_conflicts()` before implementing it, which caught a potential off-by-one error in the overlap condition before it ever appeared in the UI.
 
-- If you had another iteration, what would you improve or redesign?
+---
 
-**c. Key takeaway**
+**b. What I would improve**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+If given another iteration, I would redesign two things:
+
+1. **`preferred_time` is currently inert.** It appears in the reason string but does not affect scheduling order. A real implementation would group tasks by preferred time-of-day into morning/afternoon/evening buckets and schedule each bucket sequentially, respecting priority within each bucket. This would make the plan feel much more natural — feeding at "morning" and medication at "evening" would not both be pushed to 08:00 just because they are both high priority.
+
+2. **The Scheduler is re-created on every "Generate schedule" button click in the UI.** This means any tasks added directly via `scheduler.add_task()` (not attached to a pet) are lost between sessions. The current workaround is to always attach tasks to pets first. A cleaner design would store the `Scheduler` object in `st.session_state` alongside the `Owner`, or remove the scheduler's own task pool entirely and require all tasks to go through `Pet.add_task()`.
+
+---
+
+**c. Key takeaway — being the lead architect**
+
+The most important thing I learned is that **AI is a very fast junior developer, not an architect.** It can generate a correct sorting lambda, draft a fixture, and catch a missing attribute faster than I can type — but it does not know which tradeoffs matter for this specific system. It does not know that `preferred_time` should be a soft hint rather than a hard constraint, or that tasks should live on `Pet` rather than on `Scheduler`, or that the conflict detector should warn rather than auto-resolve. Those decisions came from understanding the user's problem, not from the code itself.
+
+The practical lesson is: **never ask AI to design, only to implement or review.** The prompts that produced the most useful output were always anchored to a specific design decision that had already been made ("implement this method given these constraints") or a specific concern to check ("review this for correctness and missing edge cases"). Open-ended prompts like "build me a scheduler" produced plausible but generic code that needed significant redesign. Constrained prompts produced code that fit cleanly into the existing system.
+
+Using separate chat sessions per phase reinforced this discipline — it prevented earlier design context from leaking into implementation sessions and made it easier to stay focused on the current question. It also made it clearer when a question belonged to a different phase (e.g., asking "should this be a method or a function?" during a testing session is a design question and belongs in a new session with the full architecture in context).
