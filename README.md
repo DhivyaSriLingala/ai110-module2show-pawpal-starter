@@ -87,3 +87,47 @@ for w in warnings:
 ```
 
 **Tradeoff:** Conflict detection uses a lightweight O(n²) pairwise check. It identifies exact minute-level overlaps and reports them as warnings, but does not attempt to auto-resolve them. This keeps the code readable and the output transparent for the owner.
+
+---
+
+## Testing PawPal+
+
+### Run the tests
+
+```bash
+python -m pytest
+```
+
+For verbose output showing every test name:
+
+```bash
+python -m pytest -v
+```
+
+### What the tests cover
+
+The suite lives in `tests/test_pawpal.py` and contains **42 tests** across 6 groups:
+
+| Group | # Tests | What is verified |
+|---|---|---|
+| **Task basics** | 10 | Completion status, task addition, priority validation, senior-pet thresholds, pet-name tagging |
+| **Sorting** | 5 | Chronological order, already-sorted input, single item, empty list, no mutation of original |
+| **Recurrence** | 7 | Daily/weekly next-task creation, correct due dates via `timedelta`, field preservation, one-off returns `None` |
+| **Conflict detection** | 6 | Overlap flagged, back-to-back not flagged, empty/single-task edge cases, three-way overlap reports all pairs |
+| **Filtering** | 7 | Filter by pet name (case-insensitive), by completion status, combined filters, empty input |
+| **Scheduler** | 7 | Priority ordering, time-budget enforcement, repeated-call reset, empty pet, remaining-minutes counter, end-time arithmetic |
+
+### Key edge cases covered
+
+- A pet with **no tasks** produces an empty schedule (not a crash)
+- A task **longer than the time budget** is silently skipped
+- Two tasks at **exactly the same start time** are flagged as a conflict
+- Two tasks placed **back-to-back** (end == next start) are correctly *not* flagged
+- Calling `generate_schedule()` **twice** does not duplicate tasks in the output
+- A recurring task with **no `due_date` set** falls back to `date.today()` as the base
+
+### Confidence level
+
+**★★★★☆ (4 / 5)**
+
+The core scheduling logic — priority ordering, time budgeting, recurrence, conflict detection, sorting, and filtering — is fully covered by automated tests. The remaining gap is the Streamlit UI layer (`app.py`), which is not covered by unit tests and would require browser-level or snapshot testing to verify end-to-end.
